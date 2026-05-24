@@ -1197,74 +1197,129 @@ namespace WindowsUpdatePauser
 
         /// <summary>
         /// 后台检查 GitHub 是否有新版本。
+        /// 使用 ETag 条件请求避免触发 API 限流（未认证 60次/小时 → 304 不计入）。
         /// silent=true: 仅在发现新版本时弹窗（启动时自动检查）。
-        /// silent=false: 始终弹窗告知结果（手动点击"检查更新"按钮）。
+        /// silent=false: 始终弹窗告知结果（手动点击按钮）。
         /// </summary>
         private void CheckForUpdates(bool silent = false)
         {
             try
             {
-                using (WebClient client = new WebClient())
+                HttpWebRequest request = (HttpWebRequest)WebRequest.Create(ReleasesApiUrl);
+                request.UserAgent = "WindowsUpdatePauser";
+                request.Timeout = 8000;
+
+                // 读取缓存的 ETag，发送条件请求减少 API 消耗
+                string etagFile = Path.Combine(Path.GetTempPath(), "wup_update_etag");
+                if (File.Exists(etagFile))
                 {
-                    client.Headers.Add("User-Agent", "WindowsUpdatePauser");
-                    string json = client.DownloadString(ReleasesApiUrl);
+                    string cachedEtag = File.ReadAllText(etagFile).Trim();
+                    if (!string.IsNullOrEmpty(cachedEtag))
+                        request.Headers["If-None-Match"] = cachedEtag;
+                }
 
-                    // 从 JSON 中提取 tag_name（例如 "v1.0"）
-                    int tagIndex = json.IndexOf("\"tag_name\"");
-                    if (tagIndex < 0) { if (!silent) ShowNoUpdate("无法获取版本信息"); return; }
-
-                    int colon = json.IndexOf(':', tagIndex);
-                    int start = json.IndexOf('"', colon + 1) + 1;
-                    int end = json.IndexOf('"', start);
-                    string tag = json.Substring(start, end - start).TrimStart('v');
-
-                    if (IsNewerVersion(CurrentVersion, tag))
+                try
+                {
+                    using (HttpWebResponse response = (HttpWebResponse)request.GetResponse())
                     {
-                        BeginInvoke(new Action(() =>
-                        {
-                            DialogResult result = MessageBox.Show(
-                                "发现新版本 v" + tag + "，请前往 GitHub 下载体验吧！\n\n" +
-                                "当前版本：v" + CurrentVersion + "\n" +
-                                "最新版本：v" + tag,
-                                AppName + " - 版本更新",
-                                MessageBoxButtons.YesNo,
-                                MessageBoxIcon.Information);
+                        // 保存新 ETag
+                        string newEtag = response.Headers["ETag"];
+                        if (!string.IsNullOrEmpty(newEtag))
+                            File.WriteAllText(etagFile, newEtag);
 
-                            if (result == DialogResult.Yes)
+                        using (StreamReader reader = new StreamReader(response.GetResponseStream()))
+                        {
+                            string json = reader.ReadToEnd();
+
+                            // 从 JSON 中提取 tag_name（例如 "v1.0"）
+                            int tagIndex = json.IndexOf("\"tag_name\"");
+                            if (tagIndex < 0) { if (!silent) ShowUpdateResult(false, null); return; }
+
+                            int colon = json.IndexOf(':', tagIndex);
+                            int start = json.IndexOf('"', colon + 1) + 1;
+                            int end = json.IndexOf('"', start);
+                            string tag = json.Substring(start, end - start).TrimStart('v');
+
+                            if (IsNewerVersion(CurrentVersion, tag))
                             {
-                                try { Process.Start(new ProcessStartInfo(GitHubUrl + "/releases/latest") { UseShellExecute = true }); }
-                                catch { }
+                                string finalTag = tag;
+                                BeginInvoke(new Action(() =>
+                                {
+                                    DialogResult result = MessageBox.Show(
+                                        "发现新版本 v" + finalTag + "，请前往 GitHub 下载体验吧！\n\n" +
+                                        "当前版本：v" + CurrentVersion + "\n" +
+                                        "最新版本：v" + finalTag,
+                                        AppName + " - 版本更新",
+                                        MessageBoxButtons.YesNo,
+                                        MessageBoxIcon.Information);
+
+                                    if (result == DialogResult.Yes)
+                                    {
+                                        try { Process.Start(new ProcessStartInfo(GitHubUrl + "/releases/latest") { UseShellExecute = true }); }
+                                        catch { }
+                                    }
+                                }));
                             }
-                        }));
+                            else if (!silent)
+                            {
+                                BeginInvoke(new Action(() => ShowUpdateResult(true, null)));
+                            }
+                        }
                     }
-                    else if (!silent)
+                }
+                catch (WebException ex)
+                {
+                    HttpWebResponse errorResponse = ex.Response as HttpWebResponse;
+                    if (errorResponse != null)
                     {
-                        BeginInvoke(new Action(() =>
+                        if (errorResponse.StatusCode == HttpStatusCode.NotModified)
                         {
-                            MessageBox.Show(
-                                "当前已是最新版本 v" + CurrentVersion + "。",
-                                AppName + " - 版本更新",
-                                MessageBoxButtons.OK,
-                                MessageBoxIcon.Information);
-                        }));
+                            // 304 = 无新版本（ETag 命中，不计入限流）
+                            if (!silent)
+                                BeginInvoke(new Action(() => ShowUpdateResult(true, null)));
+                            return;
+                        }
+                        if ((int)errorResponse.StatusCode == 429 || errorResponse.StatusCode == HttpStatusCode.Forbidden)
+                        {
+                            if (!silent)
+                                BeginInvoke(new Action(() => ShowUpdateResult(false, "请求过于频繁，请稍后再试")));
+                            return;
+                        }
                     }
+                    throw;
                 }
             }
             catch
             {
                 if (!silent)
                 {
-                    BeginInvoke(new Action(() => ShowNoUpdate("网络错误，无法检查更新")));
+                    BeginInvoke(new Action(() => ShowUpdateResult(false, "网络错误，无法检查更新")));
                 }
             }
         }
 
-        private void ShowNoUpdate(string reason)
+        /// <summary>
+        /// 显示版本检查结果。
+        /// isLatest=true → 当前已是最新；isLatest=false → 出错，显示 reason。
+        /// </summary>
+        private void ShowUpdateResult(bool isLatest, string reason)
         {
-            MessageBox.Show(reason + "。\n当前版本：v" + CurrentVersion,
-                AppName + " - 版本更新",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Warning);
+            if (isLatest)
+            {
+                MessageBox.Show(
+                    "当前已是最新版本 v" + CurrentVersion + "。",
+                    AppName + " - 版本更新",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+            }
+            else
+            {
+                MessageBox.Show(
+                    (reason ?? "检查失败") + "。\n当前版本：v" + CurrentVersion,
+                    AppName + " - 版本更新",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+            }
         }
 
         /// <summary>
