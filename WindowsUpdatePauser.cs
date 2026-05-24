@@ -1224,7 +1224,6 @@ namespace WindowsUpdatePauser
             {
                 using (WebClient client = new WebClient())
                 {
-                    client.Headers.Add("User-Agent", "WindowsUpdatePauser");
                     string json = client.DownloadString(ReleasesApiUrl);
 
                     int tagIndex = json.IndexOf("\"tag_name\"");
