@@ -1,6 +1,7 @@
 # WinFreeze — Windows Update Pauser
 
 [![License](https://img.shields.io/github/license/kefanlee/Windows-Update-Pauser)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/kefanlee/Windows-Update-Pauser)](https://github.com/kefanlee/Windows-Update-Pauser/releases/latest)
 [![.NET Framework](https://img.shields.io/badge/.NET-4.x-blue)](#构建)
 [![Platform](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-lightgrey)]()
 
