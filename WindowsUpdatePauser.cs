@@ -57,7 +57,7 @@ namespace WindowsUpdatePauser
         private const string GitHubUrl = "https://github.com/kefanlee/Windows-Update-Pauser";
 
         /// <summary>当前版本号，发版时修改此值即可，与 git tag 保持一致</summary>
-        private const string CurrentVersion = "1.0";
+        private const string CurrentVersion = "1.0.0";
 
         /// <summary>GitHub Release API 地址，用于检查最新版本</summary>
         private const string ReleasesApiUrl = "https://api.github.com/repos/kefanlee/Windows-Update-Pauser/releases/latest";
