@@ -4,7 +4,9 @@ using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.IO;
+using System.Net;
 using System.Security.Principal;
+using System.Threading;
 using System.Windows.Forms;
 
 namespace WindowsUpdatePauser
@@ -52,6 +54,12 @@ namespace WindowsUpdatePauser
 
         /// <summary>点击 GitHub 链接时打开的仓库地址，修改为你的仓库即可</summary>
         private const string GitHubUrl = "https://github.com/kefanlee/Windows-Update-Pauser";
+
+        /// <summary>当前版本号，发版时修改此值即可，与 git tag 保持一致</summary>
+        private const string CurrentVersion = "1.2.0";
+
+        /// <summary>GitHub Release API 地址，用于检查最新版本</summary>
+        private const string ReleasesApiUrl = "https://api.github.com/repos/kefanlee/Windows-Update-Pauser/releases/latest";
 
         // ============================================================
         // 颜色定义区 — 修改这些值可以统一更换整个 UI 的配色方案
@@ -199,6 +207,7 @@ namespace WindowsUpdatePauser
                 _daysText.SelectionLength = 0;
                 ActiveControl = null;                                  // 取消焦点，避免输入框默认高亮
                 ForceRefreshButtons();                                 // 强制刷新所有按钮颜色
+                ThreadPool.QueueUserWorkItem(_ => CheckForUpdates());  // 后台检查新版本
             };
         }
 
@@ -541,7 +550,7 @@ namespace WindowsUpdatePauser
             // 版权信息 — 修改这里的 Text 可以更换底部文字
             Controls.Add(new Label
             {
-                Text = "Powered by ZheL · Version 1.1 · © 2026 · 仅供学习交流",
+                Text = "Powered by ZheL · Version " + CurrentVersion + " · © 2026 · 仅供学习交流",
                 Location = new Point(41, 472),
                 Size = new Size(680, 22),
                 TextAlign = ContentAlignment.MiddleRight,
@@ -1167,6 +1176,76 @@ namespace WindowsUpdatePauser
                 }
             }
             catch { }                                                    // 调用失败不影响主流程
+        }
+
+        /// <summary>
+        /// 后台检查 GitHub 是否有新版本。
+        /// 在 Shown 事件中通过 ThreadPool 调用，不阻塞 UI。
+        /// 如有新版本弹出提示框，用户可选择前往下载。
+        /// </summary>
+        private void CheckForUpdates()
+        {
+            try
+            {
+                using (WebClient client = new WebClient())
+                {
+                    client.Headers.Add("User-Agent", "WindowsUpdatePauser");
+                    string json = client.DownloadString(ReleasesApiUrl);
+
+                    // 从 JSON 中提取 tag_name（例如 "v1.2.0"）
+                    int tagIndex = json.IndexOf("\"tag_name\"");
+                    if (tagIndex < 0) return;
+
+                    int colon = json.IndexOf(':', tagIndex);
+                    int start = json.IndexOf('"', colon + 1) + 1;
+                    int end = json.IndexOf('"', start);
+                    string tag = json.Substring(start, end - start).TrimStart('v');
+
+                    if (IsNewerVersion(CurrentVersion, tag))
+                    {
+                        BeginInvoke(new Action(() =>
+                        {
+                            DialogResult result = MessageBox.Show(
+                                "发现新版本 v" + tag + "（当前 v" + CurrentVersion + "）\n\n" +
+                                "是否前往 GitHub 下载？",
+                                AppName + " - 版本更新",
+                                MessageBoxButtons.YesNo,
+                                MessageBoxIcon.Information);
+
+                            if (result == DialogResult.Yes)
+                            {
+                                try { Process.Start(new ProcessStartInfo(GitHubUrl + "/releases/latest") { UseShellExecute = true }); }
+                                catch { }
+                            }
+                        }));
+                    }
+                }
+            }
+            catch { /* 网络错误静默忽略，不影响正常使用 */ }
+        }
+
+        /// <summary>
+        /// 比较两个语义化版本号。
+        /// 返回 true 表示 latest > current（有新版本）。
+        /// 版本号格式：major.minor.patch（如 1.2.0）。
+        /// </summary>
+        private static bool IsNewerVersion(string current, string latest)
+        {
+            try
+            {
+                string[] curParts = current.Split('.');
+                string[] newParts = latest.Split('.');
+                int len = Math.Max(curParts.Length, newParts.Length);
+                for (int i = 0; i < len; i++)
+                {
+                    int cur = i < curParts.Length ? int.Parse(curParts[i]) : 0;
+                    int nxt = i < newParts.Length ? int.Parse(newParts[i]) : 0;
+                    if (nxt > cur) return true;
+                    if (nxt < cur) return false;
+                }
+                return false;
+            }
+            catch { return false; }
         }
 
         /// <summary>
