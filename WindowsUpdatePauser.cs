@@ -171,14 +171,17 @@ namespace WindowsUpdatePauser
         /// <summary>当前程序是否以管理员权限运行</summary>
         private bool _isAdmin;
 
-        /// <summary>上次检查更新的时间，避免频繁调 API 触发限流</summary>
+        /// <summary>上次检查更新的时间</summary>
         private DateTime _lastCheckTime = DateTime.MinValue;
 
         /// <summary>缓存的 GitHub 最新版本号</summary>
         private string _cachedLatestTag;
 
-        /// <summary>手动检查更新的最小间隔（启动自动检查跟随此间隔）</summary>
+        /// <summary>API 调用最小间隔（1 小时），避免触发限流</summary>
         private static readonly TimeSpan CheckInterval = TimeSpan.FromHours(1);
+
+        /// <summary>持久化缓存的路径，app 重启后仍有效</summary>
+        private static readonly string CacheFile = Path.Combine(Path.GetTempPath(), "wup_update_cache");
 
         /// <summary>
         /// 防止循环更新的标志位。
@@ -1207,13 +1210,15 @@ namespace WindowsUpdatePauser
 
         /// <summary>
         /// 检查 GitHub 是否有新版本。
-        /// 使用本地时间缓存（1 小时间隔），避免频繁调用 API 触发限流。
-        /// silent=true: 仅在发现新版本时弹窗（启动时自动检查）。
-        /// silent=false: 始终弹窗告知结果（手动点击按钮）。
+        /// 磁盘缓存 1 小时内有效，app 重启后仍复用。
+        /// silent=true: 仅发现新版本时弹窗（启动自动检查）。
+        /// silent=false: 始终弹窗告知结果（手动点击）。
         /// </summary>
         private void CheckForUpdates(bool silent = false)
         {
-            // 缓存未过期，复用上次结果
+            LoadCache();
+
+            // 缓存未过期，直接复用
             if (_cachedLatestTag != null && DateTime.Now - _lastCheckTime < CheckInterval)
             {
                 ApplyCheckResult(_cachedLatestTag, silent);
@@ -1222,15 +1227,21 @@ namespace WindowsUpdatePauser
 
             try
             {
-                using (WebClient client = new WebClient())
+                HttpWebRequest request = (HttpWebRequest)WebRequest.Create(ReleasesApiUrl);
+                request.UserAgent = "WindowsUpdatePauser";
+                request.Proxy = null;
+                request.Timeout = 8000;
+
+                using (HttpWebResponse response = (HttpWebResponse)request.GetResponse())
+                using (StreamReader reader = new StreamReader(response.GetResponseStream()))
                 {
-                    string json = client.DownloadString(ReleasesApiUrl);
+                    string json = reader.ReadToEnd();
 
                     int tagIndex = json.IndexOf("\"tag_name\"");
                     if (tagIndex < 0)
                     {
                         if (!silent)
-                            BeginInvoke(new Action(() => ShowCheckResult(false, "无法获取版本信息")));
+                            BeginInvoke(new Action(() => ShowCheckResult(false, "无法解析版本信息")));
                         return;
                     }
 
@@ -1241,8 +1252,23 @@ namespace WindowsUpdatePauser
 
                     _lastCheckTime = DateTime.Now;
                     _cachedLatestTag = tag;
+                    SaveCache();
 
                     ApplyCheckResult(tag, silent);
+                }
+            }
+            catch (WebException ex)
+            {
+                HttpWebResponse resp = ex.Response as HttpWebResponse;
+                if (resp != null && ((int)resp.StatusCode == 429 || resp.StatusCode == HttpStatusCode.Forbidden))
+                {
+                    if (!silent)
+                        BeginInvoke(new Action(() => ShowCheckResult(false, "GitHub API 请求受限，请稍后重试")));
+                }
+                else
+                {
+                    if (!silent)
+                        BeginInvoke(new Action(() => ShowCheckResult(false, "网络错误，无法检查更新")));
                 }
             }
             catch
@@ -1250,6 +1276,35 @@ namespace WindowsUpdatePauser
                 if (!silent)
                     BeginInvoke(new Action(() => ShowCheckResult(false, "网络错误，无法检查更新")));
             }
+        }
+
+        /// <summary>从磁盘加载缓存的上次检查结果。</summary>
+        private void LoadCache()
+        {
+            try
+            {
+                if (File.Exists(CacheFile))
+                {
+                    string[] lines = File.ReadAllText(CacheFile).Split('|');
+                    if (lines.Length >= 2)
+                    {
+                        DateTime t;
+                        if (DateTime.TryParse(lines[0], out t))
+                        {
+                            _lastCheckTime = t;
+                            _cachedLatestTag = lines[1];
+                        }
+                    }
+                }
+            }
+            catch { }
+        }
+
+        /// <summary>将检查结果持久化到磁盘。</summary>
+        private void SaveCache()
+        {
+            try { File.WriteAllText(CacheFile, _lastCheckTime.ToString("o") + "|" + (_cachedLatestTag ?? "")); }
+            catch { }
         }
 
         /// <summary>根据检查结果弹窗或静默。</summary>
