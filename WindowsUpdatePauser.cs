@@ -171,6 +171,15 @@ namespace WindowsUpdatePauser
         /// <summary>当前程序是否以管理员权限运行</summary>
         private bool _isAdmin;
 
+        /// <summary>上次检查更新的时间，避免频繁调 API 触发限流</summary>
+        private DateTime _lastCheckTime = DateTime.MinValue;
+
+        /// <summary>缓存的 GitHub 最新版本号</summary>
+        private string _cachedLatestTag;
+
+        /// <summary>手动检查更新的最小间隔（启动自动检查跟随此间隔）</summary>
+        private static readonly TimeSpan CheckInterval = TimeSpan.FromHours(1);
+
         /// <summary>
         /// 防止循环更新的标志位。
         /// 当代码通过 SetDays() 修改文本框内容时设为 true，
@@ -1197,113 +1206,84 @@ namespace WindowsUpdatePauser
         }
 
         /// <summary>
-        /// 后台检查 GitHub 是否有新版本。
-        /// 使用 ETag 条件请求避免触发 API 限流（未认证 60次/小时 → 304 不计入）。
+        /// 检查 GitHub 是否有新版本。
+        /// 使用本地时间缓存（1 小时间隔），避免频繁调用 API 触发限流。
         /// silent=true: 仅在发现新版本时弹窗（启动时自动检查）。
         /// silent=false: 始终弹窗告知结果（手动点击按钮）。
         /// </summary>
         private void CheckForUpdates(bool silent = false)
         {
+            // 缓存未过期，复用上次结果
+            if (_cachedLatestTag != null && DateTime.Now - _lastCheckTime < CheckInterval)
+            {
+                ApplyCheckResult(_cachedLatestTag, silent);
+                return;
+            }
+
             try
             {
-                HttpWebRequest request = (HttpWebRequest)WebRequest.Create(ReleasesApiUrl);
-                request.UserAgent = "WindowsUpdatePauser";
-                request.Timeout = 8000;
-
-                // 读取缓存的 ETag，发送条件请求减少 API 消耗
-                string etagFile = Path.Combine(Path.GetTempPath(), "wup_update_etag");
-                if (File.Exists(etagFile))
+                using (WebClient client = new WebClient())
                 {
-                    string cachedEtag = File.ReadAllText(etagFile).Trim();
-                    if (!string.IsNullOrEmpty(cachedEtag))
-                        request.Headers["If-None-Match"] = cachedEtag;
-                }
+                    client.Headers.Add("User-Agent", "WindowsUpdatePauser");
+                    string json = client.DownloadString(ReleasesApiUrl);
 
-                try
-                {
-                    using (HttpWebResponse response = (HttpWebResponse)request.GetResponse())
+                    int tagIndex = json.IndexOf("\"tag_name\"");
+                    if (tagIndex < 0)
                     {
-                        // 保存新 ETag
-                        string newEtag = response.Headers["ETag"];
-                        if (!string.IsNullOrEmpty(newEtag))
-                            File.WriteAllText(etagFile, newEtag);
-
-                        using (StreamReader reader = new StreamReader(response.GetResponseStream()))
-                        {
-                            string json = reader.ReadToEnd();
-
-                            // 从 JSON 中提取 tag_name（例如 "v1.0"）
-                            int tagIndex = json.IndexOf("\"tag_name\"");
-                            if (tagIndex < 0) { if (!silent) BeginInvoke(new Action(() => ShowUpdateResult(false, "无法获取版本信息"))); return; }
-
-                            int colon = json.IndexOf(':', tagIndex);
-                            int start = json.IndexOf('"', colon + 1) + 1;
-                            int end = json.IndexOf('"', start);
-                            string tag = json.Substring(start, end - start).TrimStart('v');
-
-                            if (IsNewerVersion(CurrentVersion, tag))
-                            {
-                                string finalTag = tag;
-                                BeginInvoke(new Action(() =>
-                                {
-                                    DialogResult result = MessageBox.Show(
-                                        "发现新版本 v" + finalTag + "，请前往 GitHub 下载体验吧！\n\n" +
-                                        "当前版本：v" + CurrentVersion + "\n" +
-                                        "最新版本：v" + finalTag,
-                                        AppName + " - 版本更新",
-                                        MessageBoxButtons.YesNo,
-                                        MessageBoxIcon.Information);
-
-                                    if (result == DialogResult.Yes)
-                                    {
-                                        try { Process.Start(new ProcessStartInfo(GitHubUrl + "/releases/latest") { UseShellExecute = true }); }
-                                        catch { }
-                                    }
-                                }));
-                            }
-                            else if (!silent)
-                            {
-                                BeginInvoke(new Action(() => ShowUpdateResult(true, null)));
-                            }
-                        }
+                        if (!silent)
+                            BeginInvoke(new Action(() => ShowCheckResult(false, "无法获取版本信息")));
+                        return;
                     }
-                }
-                catch (WebException ex)
-                {
-                    HttpWebResponse errorResponse = ex.Response as HttpWebResponse;
-                    if (errorResponse != null)
-                    {
-                        if (errorResponse.StatusCode == HttpStatusCode.NotModified)
-                        {
-                            // 304 = 无新版本（ETag 命中，不计入限流）
-                            if (!silent)
-                                BeginInvoke(new Action(() => ShowUpdateResult(true, null)));
-                            return;
-                        }
-                        if ((int)errorResponse.StatusCode == 429 || errorResponse.StatusCode == HttpStatusCode.Forbidden)
-                        {
-                            if (!silent)
-                                BeginInvoke(new Action(() => ShowUpdateResult(false, "请求过于频繁，请稍后再试")));
-                            return;
-                        }
-                    }
-                    throw;
+
+                    int colon = json.IndexOf(':', tagIndex);
+                    int start = json.IndexOf('"', colon + 1) + 1;
+                    int end = json.IndexOf('"', start);
+                    string tag = json.Substring(start, end - start).TrimStart('v');
+
+                    _lastCheckTime = DateTime.Now;
+                    _cachedLatestTag = tag;
+
+                    ApplyCheckResult(tag, silent);
                 }
             }
             catch
             {
                 if (!silent)
-                {
-                    BeginInvoke(new Action(() => ShowUpdateResult(false, "网络错误，无法检查更新")));
-                }
+                    BeginInvoke(new Action(() => ShowCheckResult(false, "网络错误，无法检查更新")));
             }
         }
 
-        /// <summary>
-        /// 显示版本检查结果。
-        /// isLatest=true → 当前已是最新；isLatest=false → 出错，显示 reason。
-        /// </summary>
-        private void ShowUpdateResult(bool isLatest, string reason)
+        /// <summary>根据检查结果弹窗或静默。</summary>
+        private void ApplyCheckResult(string latestTag, bool silent)
+        {
+            if (IsNewerVersion(CurrentVersion, latestTag))
+            {
+                string finalTag = latestTag;
+                BeginInvoke(new Action(() =>
+                {
+                    DialogResult result = MessageBox.Show(
+                        "发现新版本 v" + finalTag + "，请前往 GitHub 下载体验吧！\n\n" +
+                        "当前版本：v" + CurrentVersion + "\n" +
+                        "最新版本：v" + finalTag,
+                        AppName + " - 版本更新",
+                        MessageBoxButtons.YesNo,
+                        MessageBoxIcon.Information);
+
+                    if (result == DialogResult.Yes)
+                    {
+                        try { Process.Start(new ProcessStartInfo(GitHubUrl + "/releases/latest") { UseShellExecute = true }); }
+                        catch { }
+                    }
+                }));
+            }
+            else if (!silent)
+            {
+                BeginInvoke(new Action(() => ShowCheckResult(true, null)));
+            }
+        }
+
+        /// <summary>弹窗显示检查结果。isLatest=true 已是最新，否则显示错误。</summary>
+        private void ShowCheckResult(bool isLatest, string reason)
         {
             if (isLatest)
             {
