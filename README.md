@@ -1,4 +1,4 @@
-# WinFreeze — Windows Update Pauser
+# Windows Update Pauser
 
 [![License](https://img.shields.io/github/license/kefanlee/Windows-Update-Pauser)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/kefanlee/Windows-Update-Pauser)](https://github.com/kefanlee/Windows-Update-Pauser/releases/latest)
@@ -63,7 +63,7 @@ build.bat
 ## 文件结构
 
 ```
-├── WinFreeze.cs          # 主程序源码
+├── WindowsUpdatePauser.cs  # 主程序源码
 ├── app.manifest          # 应用程序清单
 ├── build.bat             # 编译脚本
 ├── icon.ico              # 程序图标

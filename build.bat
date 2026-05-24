@@ -18,8 +18,8 @@ if not exist "%CSC%" (
     exit /b 1
 )
 
-if not exist "WinFreeze.cs" (
-    echo [ERROR] WinFreeze.cs not found.
+if not exist "WindowsUpdatePauser.cs" (
+    echo [ERROR] WindowsUpdatePauser.cs not found.
     pause
     exit /b 1
 )
@@ -34,7 +34,7 @@ if not exist "icon.ico" (
 if not exist "dist" mkdir "dist"
 
 echo [1/2] Compiling Windows Update Pauser.exe...
-"%CSC%" /nologo /target:winexe /platform:anycpu /optimize+ /codepage:65001 /utf8output /win32manifest:app.manifest !ICON_ARG! /out:"dist\Windows Update Pauser.exe" /reference:System.dll /reference:System.Core.dll /reference:System.Drawing.dll /reference:System.Windows.Forms.dll /reference:System.Security.dll WinFreeze.cs
+"%CSC%" /nologo /target:winexe /platform:anycpu /optimize+ /codepage:65001 /utf8output /win32manifest:app.manifest !ICON_ARG! /out:"dist\Windows Update Pauser.exe" /reference:System.dll /reference:System.Core.dll /reference:System.Drawing.dll /reference:System.Windows.Forms.dll /reference:System.Security.dll WindowsUpdatePauser.cs
 if %errorlevel% neq 0 (
     echo.
     echo [ERROR] Build failed.

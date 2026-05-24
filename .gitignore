@@ -17,3 +17,6 @@ Release/
 # 临时文件
 *.tmp
 *.log
+
+# Claude Code 本地配置
+.claude/settings.local.json
