@@ -56,7 +56,7 @@ namespace WindowsUpdatePauser
         private const string GitHubUrl = "https://github.com/kefanlee/Windows-Update-Pauser";
 
         /// <summary>当前版本号，发版时修改此值即可，与 git tag 保持一致</summary>
-        private const string CurrentVersion = "1.2.0";
+        private const string CurrentVersion = "1.3.0";
 
         /// <summary>GitHub Release API 地址，用于检查最新版本</summary>
         private const string ReleasesApiUrl = "https://api.github.com/repos/kefanlee/Windows-Update-Pauser/releases/latest";
@@ -159,6 +159,7 @@ namespace WindowsUpdatePauser
 
         /// <summary>底部 GitHub 链接标签</summary>
         private Label _linkGitHub;
+        private Label _linkCheckUpdate;
 
         /// <summary>日志文件路径（自动生成在 logs 目录下）</summary>
         private string _logFile;
@@ -525,13 +526,29 @@ namespace WindowsUpdatePauser
                 BackColor = Color.Transparent
             });
 
-            // GitHub 链接 — 位于底栏右侧，与提示行同一高度
-            // 修改 GitHubUrl 常量即可更改链接地址
+            // 检查更新 — 点击手动检测 GitHub 是否有新版本
+            _linkCheckUpdate = new Label
+            {
+                Text = "检查更新",
+                Location = new Point(570, 446),
+                Size = new Size(90, 24),
+                TextAlign = ContentAlignment.MiddleCenter,
+                Font = new Font("Microsoft YaHei UI", 9.5f, FontStyle.Underline),
+                ForeColor = SubText,
+                BackColor = Color.Transparent,
+                Cursor = Cursors.Hand
+            };
+            _linkCheckUpdate.Click += delegate { ThreadPool.QueueUserWorkItem(_ => CheckForUpdates()); };
+            _linkCheckUpdate.MouseEnter += delegate { _linkCheckUpdate.ForeColor = ActionText; };
+            _linkCheckUpdate.MouseLeave += delegate { _linkCheckUpdate.ForeColor = SubText; };
+            Controls.Add(_linkCheckUpdate);
+
+            // GitHub 链接 — 位于底栏右侧，与检查更新相邻
             _linkGitHub = new Label
             {
                 Text = "GitHub",
-                Location = new Point(560, 446),
-                Size = new Size(160, 24),
+                Location = new Point(665, 446),
+                Size = new Size(55, 24),
                 TextAlign = ContentAlignment.MiddleRight,
                 Font = new Font("Microsoft YaHei UI", 9.5f, FontStyle.Underline),
                 ForeColor = SubText,
