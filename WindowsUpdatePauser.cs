@@ -57,7 +57,7 @@ namespace WindowsUpdatePauser
         private const string GitHubUrl = "https://github.com/kefanlee/Windows-Update-Pauser";
 
         /// <summary>当前版本号，发版时修改此值即可，与 git tag 保持一致</summary>
-        private const string CurrentVersion = "1.0.0";
+        private const string CurrentVersion = "1.0.1";
 
         /// <summary>GitHub Release API 地址，用于检查最新版本</summary>
         private const string ReleasesApiUrl = "https://api.github.com/repos/kefanlee/Windows-Update-Pauser/releases/latest";
@@ -170,18 +170,6 @@ namespace WindowsUpdatePauser
 
         /// <summary>当前程序是否以管理员权限运行</summary>
         private bool _isAdmin;
-
-        /// <summary>上次检查更新的时间</summary>
-        private DateTime _lastCheckTime = DateTime.MinValue;
-
-        /// <summary>缓存的 GitHub 最新版本号</summary>
-        private string _cachedLatestTag;
-
-        /// <summary>API 调用最小间隔（1 小时），避免触发限流</summary>
-        private static readonly TimeSpan CheckInterval = TimeSpan.FromHours(1);
-
-        /// <summary>持久化缓存的路径，app 重启后仍有效</summary>
-        private static readonly string CacheFile = Path.Combine(Path.GetTempPath(), "wup_update_cache");
 
         /// <summary>
         /// 防止循环更新的标志位。
@@ -1210,21 +1198,11 @@ namespace WindowsUpdatePauser
 
         /// <summary>
         /// 检查 GitHub 是否有新版本。
-        /// 磁盘缓存 1 小时内有效，app 重启后仍复用。
         /// silent=true: 仅发现新版本时弹窗（启动自动检查）。
         /// silent=false: 始终弹窗告知结果（手动点击）。
         /// </summary>
         private void CheckForUpdates(bool silent = false)
         {
-            LoadCache();
-
-            // 缓存未过期，直接复用
-            if (_cachedLatestTag != null && DateTime.Now - _lastCheckTime < CheckInterval)
-            {
-                ApplyCheckResult(_cachedLatestTag, silent);
-                return;
-            }
-
             try
             {
                 HttpWebRequest request = (HttpWebRequest)WebRequest.Create(ReleasesApiUrl);
@@ -1250,10 +1228,6 @@ namespace WindowsUpdatePauser
                     int end = json.IndexOf('"', start);
                     string tag = json.Substring(start, end - start).TrimStart('v');
 
-                    _lastCheckTime = DateTime.Now;
-                    _cachedLatestTag = tag;
-                    SaveCache();
-
                     ApplyCheckResult(tag, silent);
                 }
             }
@@ -1276,35 +1250,6 @@ namespace WindowsUpdatePauser
                 if (!silent)
                     BeginInvoke(new Action(() => ShowCheckResult(false, "网络错误，无法检查更新")));
             }
-        }
-
-        /// <summary>从磁盘加载缓存的上次检查结果。</summary>
-        private void LoadCache()
-        {
-            try
-            {
-                if (File.Exists(CacheFile))
-                {
-                    string[] lines = File.ReadAllText(CacheFile).Split('|');
-                    if (lines.Length >= 2)
-                    {
-                        DateTime t;
-                        if (DateTime.TryParse(lines[0], out t))
-                        {
-                            _lastCheckTime = t;
-                            _cachedLatestTag = lines[1];
-                        }
-                    }
-                }
-            }
-            catch { }
-        }
-
-        /// <summary>将检查结果持久化到磁盘。</summary>
-        private void SaveCache()
-        {
-            try { File.WriteAllText(CacheFile, _lastCheckTime.ToString("o") + "|" + (_cachedLatestTag ?? "")); }
-            catch { }
         }
 
         /// <summary>根据检查结果弹窗或静默。</summary>
