@@ -20,6 +20,7 @@ namespace WindowsUpdatePauser
         [STAThread]
         private static void Main()
         {
+            ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
             Application.EnableVisualStyles();               // 启用 Windows 视觉样式（圆角控件等）
             Application.SetCompatibleTextRenderingDefault(false);
             Application.Run(new MainForm());                // 启动主窗体消息循环
@@ -1233,7 +1234,7 @@ namespace WindowsUpdatePauser
 
                             // 从 JSON 中提取 tag_name（例如 "v1.0"）
                             int tagIndex = json.IndexOf("\"tag_name\"");
-                            if (tagIndex < 0) { if (!silent) ShowUpdateResult(false, null); return; }
+                            if (tagIndex < 0) { if (!silent) BeginInvoke(new Action(() => ShowUpdateResult(false, "无法获取版本信息"))); return; }
 
                             int colon = json.IndexOf(':', tagIndex);
                             int start = json.IndexOf('"', colon + 1) + 1;
