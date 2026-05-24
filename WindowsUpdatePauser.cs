@@ -56,7 +56,7 @@ namespace WindowsUpdatePauser
         private const string GitHubUrl = "https://github.com/kefanlee/Windows-Update-Pauser";
 
         /// <summary>当前版本号，发版时修改此值即可，与 git tag 保持一致</summary>
-        private const string CurrentVersion = "1.3.0";
+        private const string CurrentVersion = "1.0";
 
         /// <summary>GitHub Release API 地址，用于检查最新版本</summary>
         private const string ReleasesApiUrl = "https://api.github.com/repos/kefanlee/Windows-Update-Pauser/releases/latest";
@@ -208,7 +208,7 @@ namespace WindowsUpdatePauser
                 _daysText.SelectionLength = 0;
                 ActiveControl = null;                                  // 取消焦点，避免输入框默认高亮
                 ForceRefreshButtons();                                 // 强制刷新所有按钮颜色
-                ThreadPool.QueueUserWorkItem(_ => CheckForUpdates());  // 后台检查新版本
+                ThreadPool.QueueUserWorkItem(_ => CheckForUpdates(silent: true));  // 后台静默检查新版本
             };
         }
 
@@ -1197,10 +1197,10 @@ namespace WindowsUpdatePauser
 
         /// <summary>
         /// 后台检查 GitHub 是否有新版本。
-        /// 在 Shown 事件中通过 ThreadPool 调用，不阻塞 UI。
-        /// 如有新版本弹出提示框，用户可选择前往下载。
+        /// silent=true: 仅在发现新版本时弹窗（启动时自动检查）。
+        /// silent=false: 始终弹窗告知结果（手动点击"检查更新"按钮）。
         /// </summary>
-        private void CheckForUpdates()
+        private void CheckForUpdates(bool silent = false)
         {
             try
             {
@@ -1209,9 +1209,9 @@ namespace WindowsUpdatePauser
                     client.Headers.Add("User-Agent", "WindowsUpdatePauser");
                     string json = client.DownloadString(ReleasesApiUrl);
 
-                    // 从 JSON 中提取 tag_name（例如 "v1.2.0"）
+                    // 从 JSON 中提取 tag_name（例如 "v1.0"）
                     int tagIndex = json.IndexOf("\"tag_name\"");
-                    if (tagIndex < 0) return;
+                    if (tagIndex < 0) { if (!silent) ShowNoUpdate("无法获取版本信息"); return; }
 
                     int colon = json.IndexOf(':', tagIndex);
                     int start = json.IndexOf('"', colon + 1) + 1;
@@ -1223,8 +1223,9 @@ namespace WindowsUpdatePauser
                         BeginInvoke(new Action(() =>
                         {
                             DialogResult result = MessageBox.Show(
-                                "发现新版本 v" + tag + "（当前 v" + CurrentVersion + "）\n\n" +
-                                "是否前往 GitHub 下载？",
+                                "发现新版本 v" + tag + "，请前往 GitHub 下载体验吧！\n\n" +
+                                "当前版本：v" + CurrentVersion + "\n" +
+                                "最新版本：v" + tag,
                                 AppName + " - 版本更新",
                                 MessageBoxButtons.YesNo,
                                 MessageBoxIcon.Information);
@@ -1236,9 +1237,34 @@ namespace WindowsUpdatePauser
                             }
                         }));
                     }
+                    else if (!silent)
+                    {
+                        BeginInvoke(new Action(() =>
+                        {
+                            MessageBox.Show(
+                                "当前已是最新版本 v" + CurrentVersion + "。",
+                                AppName + " - 版本更新",
+                                MessageBoxButtons.OK,
+                                MessageBoxIcon.Information);
+                        }));
+                    }
                 }
             }
-            catch { /* 网络错误静默忽略，不影响正常使用 */ }
+            catch
+            {
+                if (!silent)
+                {
+                    BeginInvoke(new Action(() => ShowNoUpdate("网络错误，无法检查更新")));
+                }
+            }
+        }
+
+        private void ShowNoUpdate(string reason)
+        {
+            MessageBox.Show(reason + "。\n当前版本：v" + CurrentVersion,
+                AppName + " - 版本更新",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
         }
 
         /// <summary>
