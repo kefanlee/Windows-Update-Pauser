@@ -50,8 +50,8 @@ namespace WindowsUpdatePauser
         /// </summary>
         private const string SettingsPath = @"SOFTWARE\Microsoft\WindowsUpdate\UX\Settings";
 
-        /// <summary>如何修改：将此 URL 替换为你自己的 GitHub 仓库地址</summary>
-        private const string GitHubUrl = "https://github.com";
+        /// <summary>点击 GitHub 链接时打开的仓库地址，修改为你的仓库即可</summary>
+        private const string GitHubUrl = "https://github.com/kefanlee/Windows-Update-Pauser";
 
         // ============================================================
         // 颜色定义区 — 修改这些值可以统一更换整个 UI 的配色方案
