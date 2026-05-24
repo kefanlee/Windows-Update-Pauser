@@ -9,9 +9,7 @@
 
 ## 截图
 
-<!-- 上传截图后取消下面的注释
-![主界面](screenshots/main.png)
--->
+![主界面](img/main.png)
 
 ## 功能
 
