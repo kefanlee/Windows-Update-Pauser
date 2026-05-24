@@ -1,0 +1,19 @@
+# 构建输出
+dist/
+
+# 日志文件
+logs/
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+*.cache
+bin/
+obj/
+Debug/
+Release/
+
+# 临时文件
+*.tmp
+*.log
